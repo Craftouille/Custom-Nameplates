@@ -17,8 +17,16 @@
 
 package net.momirealms.customnameplates.bukkit;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonPrimitive;
 import it.unimi.dsi.fastutil.ints.IntList;
 import me.clip.placeholderapi.PlaceholderAPI;
+import net.kyori.adventure.key.Key;
+import net.kyori.adventure.nbt.api.BinaryTagHolder;
+import net.kyori.adventure.text.event.DataComponentValueConverterRegistry;
+import net.kyori.adventure.text.serializer.gson.GsonDataComponentValue;
 import net.momirealms.customnameplates.api.CNPlayer;
 import net.momirealms.customnameplates.api.ConfigManager;
 import net.momirealms.customnameplates.api.CustomNameplates;
@@ -26,6 +34,7 @@ import net.momirealms.customnameplates.api.Platform;
 import net.momirealms.customnameplates.api.feature.bossbar.BossBar;
 import net.momirealms.customnameplates.api.feature.tag.NameTagConfig;
 import net.momirealms.customnameplates.api.helper.AdventureHelper;
+import net.momirealms.customnameplates.api.helper.GsonHelper;
 import net.momirealms.customnameplates.api.helper.VersionHelper;
 import net.momirealms.customnameplates.api.network.PacketEvent;
 import net.momirealms.customnameplates.api.network.Tracker;
@@ -40,7 +49,16 @@ import net.momirealms.customnameplates.bukkit.util.EntityData;
 import net.momirealms.customnameplates.bukkit.util.Reflections;
 import net.momirealms.customnameplates.common.util.TriConsumer;
 import net.momirealms.customnameplates.common.util.UUIDUtils;
+import net.momirealms.sparrow.nbt.EndTag;
+import net.momirealms.sparrow.nbt.Tag;
+import net.momirealms.sparrow.nbt.codec.JsonOps;
+import net.momirealms.sparrow.nbt.codec.LegacyJavaOps;
+import net.momirealms.sparrow.nbt.codec.LegacyJsonOps;
+import net.momirealms.sparrow.nbt.codec.NBTOps;
+import net.momirealms.sparrow.nbt.parser.TagParser;
 import net.momirealms.sparrow.reflection.clazz.SparrowClass;
+import net.momirealms.sparrow.reflection.constructor.SConstructor2;
+import net.momirealms.sparrow.reflection.constructor.matcher.ConstructorMatcher;
 import net.momirealms.sparrow.reflection.field.SField;
 import net.momirealms.sparrow.reflection.field.matcher.FieldMatcher;
 import org.bukkit.Bukkit;
@@ -50,6 +68,7 @@ import org.bukkit.entity.Player;
 
 import java.lang.reflect.InvocationTargetException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
 
@@ -103,6 +122,8 @@ public class BukkitPlatform implements Platform {
     }
 
     static {
+        injectAdventure();
+
 //        ThrowableFunction<Object, String> scoreContentNameFunction = VersionHelper.isVersionNewerThan1_21_2() ? (o -> {
 //            @SuppressWarnings("unchecked")
 //            Optional<String> optional = (Optional<String>) Reflections.method$Either$right.invoke(o);
@@ -211,9 +232,11 @@ public class BukkitPlatform implements Platform {
                 int entityID = (int) Reflections.field$ClientboundAddEntityPacket$entityId.get(packet);
                 CNPlayer added = CustomNameplates.getInstance().getPlayer(entityID);
                 if (added != null) {
-                    Tracker tracker = added.addPlayerToTracker(player);
-                    tracker.setSpectator(added.isSpectator());
-                    CustomNameplates.getInstance().getUnlimitedTagManager().onAddPlayer(added, player);
+                    event.afterSend(() -> {
+                        Tracker tracker = added.addPlayerToTracker(player);
+                        tracker.setSpectator(added.isSpectator());
+                        CustomNameplates.getInstance().getUnlimitedTagManager().onAddPlayer(added, player);
+                    });
                 }
             } catch (ReflectiveOperationException e) {
                 CustomNameplates.getInstance().getPluginLogger().severe("Failed to handle ClientboundAddEntityPacket", e);
@@ -227,9 +250,11 @@ public class BukkitPlatform implements Platform {
                 int entityID = (int) Reflections.field$PacketPlayOutNamedEntitySpawn$entityId.get(packet);
                 CNPlayer added = CustomNameplates.getInstance().getPlayer(entityID);
                 if (added != null) {
-                    Tracker tracker = added.addPlayerToTracker(player);
-                    tracker.setSpectator(added.isSpectator());
-                    CustomNameplates.getInstance().getUnlimitedTagManager().onAddPlayer(added, player);
+                    event.afterSend(() -> {
+                        Tracker tracker = added.addPlayerToTracker(player);
+                        tracker.setSpectator(added.isSpectator());
+                        CustomNameplates.getInstance().getUnlimitedTagManager().onAddPlayer(added, player);
+                    });
                 }
             } catch (ReflectiveOperationException e) {
                 CustomNameplates.getInstance().getPluginLogger().severe("Failed to handle PacketPlayOutNamedEntitySpawn", e);
@@ -773,5 +798,39 @@ public class BukkitPlatform implements Platform {
     private void handlePacket(CNPlayer player, PacketEvent event, Object packet) {
         Optional.ofNullable(packetFunctions.get(packet.getClass().getSimpleName()))
                 .ifPresent(function -> function.accept(player, event, packet));
+    }
+
+    @SuppressWarnings("unchecked")
+    public static void injectAdventure() {
+        Map<Class<?>, Map<Class<?>, Object>> CACHE = (Map<Class<?>, Map<Class<?>, Object>>) SparrowClass.of(SparrowClass.find("net.kyori.adventure.text.event.DataComponentValueConverterRegistry$ConversionCache"))
+                .getDeclaredSparrowField(FieldMatcher.named("CACHE"))
+                .mh()
+                .get(null);
+        Class<?> tagClass = SparrowClass.find("net.kyori.adventure.nbt.api.BinaryTagHolderImpl");
+        DataComponentValueConverterRegistry.Conversion<BinaryTagHolder, GsonDataComponentValue> convertor1 = DataComponentValueConverterRegistry.Conversion.convert(
+                BinaryTagHolder.class,
+                GsonDataComponentValue.class,
+                (key, srcValue) -> {
+                    try {
+                        Tag tag = TagParser.parseTagFully(srcValue.string());
+                        if (tag == EndTag.INSTANCE) {
+                            return GsonDataComponentValue.gsonDataComponentValue(JsonNull.INSTANCE);
+                        } else {
+                            if (VersionHelper.isVersionNewerThan1_20_5()) {
+                                return GsonDataComponentValue.gsonDataComponentValue(NBTOps.INSTANCE.convertTo(JsonOps.INSTANCE, tag));
+                            } else {
+                                return GsonDataComponentValue.gsonDataComponentValue(LegacyJavaOps.INSTANCE.convertTo(LegacyJsonOps.INSTANCE, tag));
+                            }
+                        }
+                    } catch (Throwable e) {
+                        return GsonDataComponentValue.gsonDataComponentValue(JsonNull.INSTANCE);
+                    }
+                }
+        );
+        SConstructor2 constructor = SparrowClass.of(SparrowClass.find("net.kyori.adventure.text.event.DataComponentValueConverterRegistry$RegisteredConversion"))
+                .getDeclaredSparrowConstructor(ConstructorMatcher.takeArguments(Key.class, DataComponentValueConverterRegistry.Conversion.class))
+                .asm$2();
+        CACHE.computeIfAbsent(tagClass, $ -> new ConcurrentHashMap<>())
+                .computeIfAbsent(GsonDataComponentValue.class, $ -> constructor.newInstance(Key.key("nameplates", "serializer/nbt"), convertor1));
     }
 }
