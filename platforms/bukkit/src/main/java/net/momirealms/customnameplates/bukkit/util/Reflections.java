@@ -999,9 +999,10 @@ public final class Reflections {
     );
 
     public static final Field field$ClientboundSetPlayerTeamPacket$players = requireNonNull(
-            ReflectionUtils.getInstanceDeclaredField(
-                    clazz$ClientboundSetPlayerTeamPacket, Collection.class, 0
-            )
+            ReflectionUtils.getInstanceDeclaredFields(clazz$ClientboundSetPlayerTeamPacket).stream()
+                    .filter(field -> Collection.class.isAssignableFrom(field.getType()))
+                    .findFirst()
+                    .orElse(null)
     );
 
     public static final Field field$ClientboundSetPlayerTeamPacket$name = requireNonNull(
