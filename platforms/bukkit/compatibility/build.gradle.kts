@@ -13,7 +13,9 @@ repositories {
     maven("https://repo.opencollab.dev/main/") // geyser
     maven("https://maven.enginehub.org/repo/") // worldguard worldedit
     maven("https://repo.alessiodp.com/releases/") // parties
-    maven("https://maven.devs.beer/") // ia
+    maven("https://maven.devs.beer/") { // ia
+        content { includeGroup("dev.lone") }
+    }
     maven("https://repo.pinodev.it/releases/") // zelchat
     maven("https://repo.hibiscusmc.com/releases") // hmccosmetics
 }

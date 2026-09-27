@@ -27,12 +27,20 @@ jobs:
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+      with:
+        cache-read-only: false
 
     - name: Grant execute permission for gradlew
       run: chmod +x ./gradlew
 
     - name: Build with Gradle Wrapper
-      run: ./gradlew build
+      run: |
+        for attempt in 1 2 3; do
+          ./gradlew build && exit 0
+          echo "Build attempt $attempt failed, retrying in $((attempt * 30))s"
+          sleep $((attempt * 30))
+        done
+        exit 1
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
